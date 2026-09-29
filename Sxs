@@ -1,0 +1,197 @@
+package com.codegym;
+
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+public class MainApp {
+
+    // =========================================================================
+    // MODEL CLASS: User
+    // =========================================================================
+    public static class User {
+        private int id;
+        private String name;
+        private String email;
+        private String country;
+
+        public User() {}
+
+        public User(int id, String name, String email, String country) {
+            this.id = id;
+            this.name = name;
+            this.email = email;
+            this.country = country;
+        }
+
+        public int getId() { return id; }
+        public void setId(int id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getCountry() { return country; }
+        public void setCountry(String country) { this.country = country; }
+    }
+
+    // =========================================================================
+    // DAO INTERFACE: IUserDAO
+    // =========================================================================
+    public interface IUserDAO {
+        void insertUser(User user) throws SQLException;
+        User selectUser(int id);
+        List<User> selectAllUsers();
+        boolean deleteUser(int id) throws SQLException;
+        boolean updateUser(User user) throws SQLException;
+
+        // Phương thức xử lý có sử dụng Transaction
+        void insertUpdateUseTransaction() throws SQLException;
+    }
+
+    // =========================================================================
+    // DAO IMPLEMENTATION: UserDAO
+    // =========================================================================
+    public static class UserDAO implements IUserDAO {
+        private String jdbcURL = "jdbc:mysql://localhost:3306/demo?useSSL=false";
+        private String jdbcUsername = "root";
+        private String jdbcPassword = "123456";
+
+        private static final String SQL_INSERT = "INSERT INTO Employee (name, salary, created_Date) VALUES (?,?,?)";
+        private static final String SQL_UPDATE = "UPDATE Employee SET salary=? WHERE name=?";
+        private static final String SQL_TABLE_CREATE = "CREATE TABLE Employee"
+                + "("
+                + " id INT(11) AUTO_INCREMENT,"
+                + " name VARCHAR(100) NOT NULL,"
+                + " salary DECIMAL(15, 2) NOT NULL,"
+                + " created_Date TIMESTAMP,"
+                + " PRIMARY KEY (id)"
+                + ")";
+        private static final String SQL_TABLE_DROP = "DROP TABLE IF EXISTS Employee";
+
+        protected Connection getConnection() {
+            Connection connection = null;
+            try {
+                Class.forName("com.mysql.cj.jdbc.Driver");
+                connection = DriverManager.getConnection(jdbcURL, jdbcUsername, jdbcPassword);
+            } catch (SQLException | ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            return connection;
+        }
+
+        @Override
+        public void insertUser(User user) throws SQLException {}
+
+        @Override
+        public User selectUser(int id) { return null; }
+
+        @Override
+        public List<User> selectAllUsers() { return new ArrayList<>(); }
+
+        @Override
+        public boolean deleteUser(int id) throws SQLException { return false; }
+
+        @Override
+        public boolean updateUser(User user) throws SQLException { return false; }
+
+        // Triển khai logic CÓ sử dụng Transaction
+        @Override
+        public void insertUpdateUseTransaction() {
+            try (Connection conn = getConnection();
+                 Statement statement = conn.createStatement();
+                 PreparedStatement psInsert = conn.prepareStatement(SQL_INSERT);
+                 PreparedStatement psUpdate = conn.prepareStatement(SQL_UPDATE)) {
+
+                statement.execute(SQL_TABLE_DROP);
+                statement.execute(SQL_TABLE_CREATE);
+
+                // 1. Tắt auto-commit để bắt đầu Transaction Block
+                conn.setAutoCommit(false);
+
+                // 2. Thực thi các câu lệnh Insert
+                psInsert.setString(1, "Quynh");
+                psInsert.setBigDecimal(2, new BigDecimal(10));
+                psInsert.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now()));
+                psInsert.execute();
+
+                psInsert.setString(1, "Ngan");
+                psInsert.setBigDecimal(2, new BigDecimal(20));
+                psInsert.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now()));
+                psInsert.execute();
+
+                // 3. Thực thi câu lệnh Update
+                // --- LẦN 1: Cố tình để mã lỗi (chỉnh index = 2) để kiểm chứng Rollback ---
+                // psUpdate.setBigDecimal(2, new BigDecimal(999.99));
+                
+                // --- LẦN 2: Sửa lại mã chuẩn để kiểm chứng Commit thành công ---
+                psUpdate.setBigDecimal(1, new BigDecimal(999.99));
+                psUpdate.setString(2, "Quynh");
+                psUpdate.execute();
+
+                // 4. Kết thúc Transaction: Commit tất cả sự thay đổi vào CSDL
+                conn.commit();
+
+                // Bật lại chế độ Auto-Commit về mặc định
+                conn.setAutoCommit(true);
+
+            } catch (Exception e) {
+                System.out.println("Lỗi xảy ra, Transaction đã được tự động rollback khi đóng kết nối!");
+                System.out.println(e.getMessage());
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // =========================================================================
+    // CONTROLLER: UserServlet
+    // =========================================================================
+    @WebServlet(name = "UserServlet", urlPatterns = "/users")
+    public static class UserServlet extends HttpServlet {
+        private static final long serialVersionUID = 1L;
+        private IUserDAO userDAO;
+
+        public void init() {
+            userDAO = new UserDAO();
+        }
+
+        protected void doGet(HttpServletRequest request, HttpServletResponse response)
+                throws ServletException, IOException {
+            String action = request.getParameter("action");
+            if (action == null) {
+                action = "";
+            }
+
+            switch (action) {
+                case "test-use-tran":
+                    testUseTran(request, response);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private void testUseTran(HttpServletRequest request, HttpServletResponse response) {
+            try {
+                userDAO.insertUpdateUseTransaction();
+                System.out.println("Hoàn tất gọi hàm testUseTran!");
+                response.getWriter().println("Da thuc hien testUseTran. Kiem tra console/database!");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
